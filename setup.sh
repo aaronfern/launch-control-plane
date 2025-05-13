@@ -4,7 +4,9 @@ set -eo pipefail
 echoErr() { echo "$@" 1>&2; }
 
 
-go install github.com/k3s-io/kine@latest
+go install -buildvcs=true github.com/k3s-io/kine@latest
+go install -buildvcs=true github.com/elankath/procmon@latest
+go install -buildvcs=true github.com/elankath/kubestress@latest
 
 KSRC="$HOME/go/src/k8s.io/kubernetes/kubernetes"
 PROJ_DIR=$(dirname "$(realpath "$0")")

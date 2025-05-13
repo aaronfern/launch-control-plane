@@ -3,6 +3,17 @@ set -eo pipefail
 
 echoErr() { echo "$@" 1>&2; }
 
+signal_received=0
+
+function cleanup() {
+    echo "Received signal $1"
+    signal_received=1
+    kill -9 $KINEPID
+    kill -9 $KAPIPID
+    kill -9 $KSCHDPID
+    kill -9 $PROCMONPID
+}
+
 function generate_certs() {
   echo "Generating certificates for the kube-apiserver"
 
@@ -70,20 +81,27 @@ if [ ! -x bin/kube-apiserver ]; then
     exit 1
 fi
 
-if [ ! -x bin/kube-schedulerr ]; then
+if [ ! -x bin/kube-scheduler ]; then
     echo "Err: kube-scheduler binary not found in bin/. Please run the setup.sh script."
     exit 1
 fi
 
+rm -rf db/
+mkdir db
+
+trap cleanup EXIT INT TERM
+echo "Setup signal handler"
+
 
 echo "Starting kine"
-kine &
+kine > /tmp/kine.log 2>&1 &
 KINEPID=$!
+echo "Started kine. Logs at /tmp/kine.log"
 
 echo "kine pid is $KINEPID"
 
 echo "waiting for kine to start up"
-sleep 3
+sleep 5
 
 generate_certs
 generate_kubeconfig
@@ -102,10 +120,51 @@ bin/kube-apiserver \
 --service-account-key-file=gen/sa.key \
 --service-account-signing-key-file=gen/sa.key \
 --service-account-issuer=https://kubernetes.default.svc \
-&
+--v=6 > /tmp/kube-apiserver.log 2>&1 &
+KAPIPID=$!
+echo "Started kube-apiserver. Logs at /tmp/kube-apiserver.log"
+
+echo "waiting for kube-apiserver to start up"
+sleep 5
 
 echo "Starting kube-scheduler"
 bin/kube-scheduler \
 --kubeconfig=gen/kubeconfig \
 --leader-elect=false \
---bind-address=127.0.0.1
+--bind-address=127.0.0.1 \
+--v=6 > /tmp/kube-scheduler.log 2>&1 &
+KSCHDPID=$!
+echo "Started kube-scheduler. Logs at /tmp/kube-scheduler.log"
+
+echo "waiting for kube-scheduler to start up"
+sleep 5
+
+procmon -d /tmp/kine-cp -interval 5s -n kine-cp kine kube-apiserver kube-scheduler &
+PROCMONPID=$!
+echo "waiting for procmon to start up"
+sleep 12
+
+echo "Starting kubestress"
+kubestress load -k gen/kubeconfig -n 5000 -s a
+echo "waiting for cluster to stabilise"
+sleep 60
+
+#while [[ $signal_received -eq 0  ]]; do
+#  sleep 5
+#done
+
+
+## Load zselect module
+#zmodload zsh/zselect
+#
+## Block until a signal is received
+##zselect -s INT $KINEPID
+#
+## Open dummy file descriptor
+#exec 3>/dev/null
+#
+## zselect stuff
+#zselect -s INT USR1 3
+#
+## Close dummy file descriptor
+#exec 3>&-
