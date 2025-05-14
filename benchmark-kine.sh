@@ -6,6 +6,7 @@ echoErr() { echo "$@" 1>&2; }
 signal_received=0
 
 function cleanup() {
+    set +e
     echo "Received signal $1"
     signal_received=1
     kill -9 $KINEPID
@@ -132,6 +133,8 @@ bin/kube-scheduler \
 --kubeconfig=gen/kubeconfig \
 --leader-elect=false \
 --bind-address=127.0.0.1 \
+--kube-api-content-type="application/json" \
+--secure-port=8090 \
 --v=6 > /tmp/kube-scheduler.log 2>&1 &
 KSCHDPID=$!
 echo "Started kube-scheduler. Logs at /tmp/kube-scheduler.log"
@@ -139,15 +142,15 @@ echo "Started kube-scheduler. Logs at /tmp/kube-scheduler.log"
 echo "waiting for kube-scheduler to start up"
 sleep 5
 
-procmon -d /tmp/kine-cp -interval 5s -n kine-cp kine kube-apiserver kube-scheduler &
+procmon -d /tmp/10k/kine-cp -interval 5s -n kine-cp kine kube-apiserver kube-scheduler &
 PROCMONPID=$!
 echo "waiting for procmon to start up"
 sleep 12
 
 echo "Starting kubestress"
-kubestress load -k gen/kubeconfig -n 5000 -s a
+time kubestress load -k gen/kubeconfig -n 10000 -s a
 echo "waiting for cluster to stabilise"
-sleep 60
+sleep 30
 
 #while [[ $signal_received -eq 0  ]]; do
 #  sleep 5
